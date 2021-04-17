@@ -37,7 +37,7 @@ body { margin: 0; padding: 0; }
     var modelRotate = [Math.PI / 2, 0, 0];
     
     var modelAsMercatorCoordinate = mapboxgl.MercatorCoordinate.fromLngLat(
-    modelOrigin,
+    unprojectedOrigin,
     modelAltitude
     );
     
