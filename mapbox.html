@@ -7,6 +7,7 @@
 <link href="https://api.mapbox.com/mapbox-gl-js/v2.2.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v2.2.0/mapbox-gl.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.7.2/proj4.min.js"></script>
+<script src="./addShadersToGLTF.js"></script>
 <style>
 body { margin: 0; padding: 0; }
 #map { position: absolute; top: 0; bottom: 0; width: 100%; }
@@ -180,21 +181,23 @@ background: #3074a4;
             
             var directionalLight2 = new THREE.DirectionalLight(0xffffff);
             this.scene.add(directionalLight2);
+
+            var uniforms = {
+                u_resolution: { value: new THREE.Vector2() },
+                u_mouse: { value: new THREE.Vector2() },
+                u_helmet_texture: { value: null }
+            };
     
             // use the three.js GLTF loader to add the 3D model to the three.js scene
             var loader = new THREE.GLTFLoader();
+            var imageBufferDEM;
+            var imageOverlayPNG;
+            loader.load('export_kaikoura_dem.gltf', function (gltf) {
+                imageBufferDEM = getPNGImage(gltf, 'mesh_0');
+            });
             loader.load('export_kaikoura.gltf', function (gltf) {
-                gltf.scene.traverse(function(child) {
-            
-                    if(child.isMesh) {
-                        // child.material =  new THREE.ShaderMaterial({
-                        //     // uniforms: uniforms,
-                        //     vertexShader: document.getElementById('vert').textContent,
-                        //     fragmentShader: document.getElementById('frag').textContent
-                        // });
-                    }
-                    
-                });
+                imageOverlayPNG = getPNGImage(gltf, 'mesh_0');
+                //addShadersToGLTF(gltf, );
 
 
                 this.scene.add(gltf.scene);
