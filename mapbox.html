@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Add a 3D model</title>
+<title>GEOHack</title>
 <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
 <link href="https://api.mapbox.com/mapbox-gl-js/v2.2.0/mapbox-gl.css" rel="stylesheet">
 <script src="https://api.mapbox.com/mapbox-gl-js/v2.2.0/mapbox-gl.js"></script>
@@ -53,20 +53,83 @@ background: #3074a4;
 }
 
 </style>
+<script src="https://unpkg.com/three@0.126.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
+
 </head>
 <body>
 
- 
+<div id="frag" style="display: none;">precision highp float;
+    varying vec3 v_normal;
+    uniform vec4 u_ambient;
+    varying vec2 v_texcoord0;
+    uniform sampler2D u_diffuse;
+    uniform vec4 u_emission;
+    uniform vec4 u_specular;
+    uniform float u_shininess;
+    varying vec3 v_light0Direction;
+    varying vec3 v_position;
+    uniform vec3 u_light0Color;
+    void main(void) {
+        vec3 normal = normalize(v_normal);
+        vec4 color = vec4(0., 0., 0., 0.);
+        vec4 diffuse = vec4(0., 0., 0., 1.);
+        vec3 diffuseLight = vec3(0., 0., 0.);
+        vec4 emission;
+        vec4 ambient;
+        vec4 specular;
+        ambient = u_ambient;
+        diffuse = texture2D(u_diffuse, v_texcoord0);
+        emission = u_emission;
+        specular = u_specular;
+        vec3 specularLight = vec3(0., 0., 0.);
+        {
+            float specularIntensity = 0.;
+            float attenuation = 1.0;
+            vec3 l = normalize(v_light0Direction);
+            vec3 viewDir = -normalize(v_position);
+            vec3 h = normalize(l+viewDir);
+            specularIntensity = max(0., pow(max(dot(normal,h), 0.) , u_shininess)) * attenuation;
+            specularLight += u_light0Color * specularIntensity;
+            diffuseLight += u_light0Color * max(dot(normal,l), 0.) * attenuation;
+        }
+        specular.xyz *= specularLight;
+        color.xyz += specular.xyz;
+        diffuse.xyz *= diffuseLight;
+        color.xyz += diffuse.xyz;
+        color.xyz += emission.xyz;
+        color = vec4(color.rgb * diffuse.a, diffuse.a);
+        gl_FragColor = diffuse;
+    }</div> 
+<div id="vert" style="display: none;">precision highp float;
+    attribute vec3 a_position;
+    attribute vec3 a_normal;
+    varying vec3 v_normal;
+    uniform mat3 u_normalMatrix;
+    uniform mat4 u_modelViewMatrix;
+    uniform mat4 u_projectionMatrix;
+    attribute vec2 a_texcoord0;
+    varying vec2 v_texcoord0;
+    varying vec3 v_light0Direction;
+    varying vec3 v_position;
+    uniform mat4 u_light0Transform;
+    void main(void) {
+        vec4 pos = u_modelViewMatrix * vec4(a_position,1.0);
+        v_normal = u_normalMatrix * a_normal;
+        v_texcoord0 = a_texcoord0;
+        v_position = pos.xyz;
+        v_light0Direction = mat3(u_light0Transform) * vec3(0.,0.,1.);
+        gl_Position = u_projectionMatrix * pos;
+    }</div> 
 <nav id="menu"></nav>
-
-<script src="https://unpkg.com/three@0.126.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
 <div id="map"></div>
+
 <script>
     mapboxgl.accessToken = 'pk.eyJ1IjoianF1ZXJ5NDA0IiwiYSI6ImNpbDQwNHV0YjNzazB1eWtzYWRleXVmOGIifQ.HrzVBbMbMz7Zbxuoie03BQ';
 
     //19095792.77691212, -5121804.011996501
     //19351489.847933076, -5196809.473803148
+    //19350894.634010892, -5196416.712003031
     var modelOrigin = [19351489.847933076, -5196809.473803148];
     var projPseudoMercator = '+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +wktext  +no_defs';
     var projWorld = '+proj=longlat +datum=WGS84 +no_defs';
@@ -86,108 +149,165 @@ background: #3074a4;
     var modelRotate = [Math.PI / 2, 0, 0];
     
     var modelAsMercatorCoordinate = mapboxgl.MercatorCoordinate.fromLngLat(
-    unprojectedOrigin,
-    modelAltitude
+        unprojectedOrigin,
+        modelAltitude
     );
     
     // transformation parameters to position, rotate and scale the 3D model onto the map
     var modelTransform = {
-    translateX: modelAsMercatorCoordinate.x,
-    translateY: modelAsMercatorCoordinate.y,
-    translateZ: modelAsMercatorCoordinate.z,
-    rotateX: modelRotate[0],
-    rotateY: modelRotate[1],
-    rotateZ: modelRotate[2],
-    /* Since our 3D model is in real world meters, a scale transform needs to be
-    * applied since the CustomLayerInterface expects units in MercatorCoordinates.
-    */
-    scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()*20
+        translateX: modelAsMercatorCoordinate.x,
+        translateY: modelAsMercatorCoordinate.y,
+        translateZ: modelAsMercatorCoordinate.z,
+        rotateX: modelRotate[0],
+        rotateY: modelRotate[1],
+        rotateZ: modelRotate[2],
+        scale: modelAsMercatorCoordinate.meterInMercatorCoordinateUnits()*20
     };
     
     var THREE = window.THREE;
     
     // configuration of the custom layer for a 3D model per the CustomLayerInterface
     var customLayer = {
-    id: '3d-model',
-    type: 'custom',
-    renderingMode: '3d',
-    onAdd: function (map, gl) {
-    this.camera = new THREE.Camera();
-    this.scene = new THREE.Scene();
-    
-    // create two three.js lights to illuminate the model
-    var directionalLight = new THREE.DirectionalLight(0xffffff,.5);
-    this.scene.add(directionalLight);
-    
-    var directionalLight2 = new THREE.DirectionalLight(0xffffff);
-    this.scene.add(directionalLight2);
-    
-    // use the three.js GLTF loader to add the 3D model to the three.js scene
-    var loader = new THREE.GLTFLoader();
-    loader.load('export_kaikoura.gltf', function (gltf) {
-        this.scene.add(gltf.scene);
-    }.bind(this));
-    
-    this.map = map;
+        id: '3d-model',
+        type: 'custom',
+        renderingMode: '3d',
+        onAdd: function (map, gl) {
+            this.camera = new THREE.Camera();
+            this.scene = new THREE.Scene();
 
-    map.addSource('contours', {
-        type: 'vector',
-        url: 'mapbox://mapbox.mapbox-terrain-v2'
-    });
-    map.addLayer({
-        'id': 'contours',
-        'type': 'line',
-        'source': 'contours',
-        'source-layer': 'contour',
-        'layout': {
-            'visibility': 'visible',
-            'line-join': 'round',
-            'line-cap': 'round'
+            var directionalLight = new THREE.DirectionalLight(0xffffff,.5);
+            this.scene.add(directionalLight);
+            
+            var directionalLight2 = new THREE.DirectionalLight(0xffffff);
+            this.scene.add(directionalLight2);
+    
+            // use the three.js GLTF loader to add the 3D model to the three.js scene
+            var loader = new THREE.GLTFLoader();
+            loader.load('export_kaikoura.gltf', function (gltf) {
+                gltf.scene.traverse(function(child) {
+            
+                    if(child.isMesh) {
+                        // child.material =  new THREE.ShaderMaterial({
+                        //     // uniforms: uniforms,
+                        //     vertexShader: document.getElementById('vert').textContent,
+                        //     fragmentShader: document.getElementById('frag').textContent
+                        // });
+                    }
+                    
+                });
+
+
+                this.scene.add(gltf.scene);
+            }.bind(this));
+    
+            this.map = map;
+
+            map.addSource('contours', {
+                type: 'vector',
+                url: 'mapbox://mapbox.mapbox-terrain-v2'
+            });
+            map.addLayer({
+                'id': 'contours',
+                'type': 'line',
+                'source': 'contours',
+                'source-layer': 'contour',
+                'layout': {
+                    'visibility': 'visible',
+                    'line-join': 'round',
+                    'line-cap': 'round'
+                },
+                'paint': {
+                    'line-color': '#877b59',
+                    'line-width': 1
+                }
+            }); 
+
+            // Insert the layer beneath any symbol layer.
+            var layers = map.getStyle().layers;
+            var labelLayerId;
+            for (var i = 0; i < layers.length; i++) {
+                if (layers[i].type === 'symbol' && layers[i].layout['text-field']) {
+                    labelLayerId = layers[i].id;
+                    break;
+                }
+            }
+
+            // The 'building' layer in the Mapbox Streets
+            // vector tileset contains building height data
+            // from OpenStreetMap.
+            map.addLayer({
+                'id': 'add-3d-buildings',
+                'source': 'composite',
+                'source-layer': 'building',
+                'filter': ['==', 'extrude', 'true'],
+                'type': 'fill-extrusion',
+                'minzoom': 15,
+                'paint': {
+                    'fill-extrusion-color': '#ff0000',
+                
+                    // Use an 'interpolate' expression to
+                    // add a smooth transition effect to
+                    // the buildings as the user zooms in.
+                    'fill-extrusion-height': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        15,
+                        0,
+                        15.05,
+                        ['get', 'height']
+                    ],
+                    'fill-extrusion-base': [
+                        'interpolate',
+                        ['linear'],
+                        ['zoom'],
+                        15,
+                        0,
+                        15.05,
+                        ['get', 'min_height']
+                    ],
+                    'fill-extrusion-opacity': 0.9
+                }
+            },labelLayerId);
+
+    
+            // use the Mapbox GL JS map canvas for three.js
+            this.renderer = new THREE.WebGLRenderer({
+                canvas: map.getCanvas(),
+                context: gl,
+                antialias: true
+            });
+            
+            this.renderer.autoClear = false;
         },
-        'paint': {
-            'line-color': '#877b59',
-            'line-width': 1
+        render: function (gl, matrix) {
+            var rotationX = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 0, 0), modelTransform.rotateX);
+            var rotationY = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(0, 1, 0), modelTransform.rotateY);
+            var rotationZ = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(0, 0, 1), modelTransform.rotateZ);
+            
+            var m = new THREE.Matrix4().fromArray(matrix);
+            var l = new THREE.Matrix4().makeTranslation(
+                modelTransform.translateX,
+                modelTransform.translateY,
+                modelTransform.translateZ
+            ).scale(new THREE.Vector3(
+                modelTransform.scale,
+                -modelTransform.scale,
+                modelTransform.scale
+            ))
+            .multiply(rotationX)
+            .multiply(rotationY)
+            .multiply(rotationZ);
+    
+            this.camera.projectionMatrix = m.multiply(l);
+            this.renderer.resetState();
+            this.renderer.render(this.scene, this.camera);
+            this.map.triggerRepaint();
         }
-    }); 
-
-    
-    // use the Mapbox GL JS map canvas for three.js
-    this.renderer = new THREE.WebGLRenderer({
-        canvas: map.getCanvas(),
-        context: gl,
-        antialias: true
-    });
-    
-    this.renderer.autoClear = false;
-    },
-    render: function (gl, matrix) {
-    var rotationX = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 0, 0), modelTransform.rotateX);
-    var rotationY = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(0, 1, 0), modelTransform.rotateY);
-    var rotationZ = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(0, 0, 1), modelTransform.rotateZ);
-    
-    var m = new THREE.Matrix4().fromArray(matrix);
-    var l = new THREE.Matrix4().makeTranslation(
-        modelTransform.translateX,
-        modelTransform.translateY,
-        modelTransform.translateZ
-    ).scale(new THREE.Vector3(
-        modelTransform.scale,
-        -modelTransform.scale,
-        modelTransform.scale
-    ))
-    .multiply(rotationX)
-    .multiply(rotationY)
-    .multiply(rotationZ);
-    
-    this.camera.projectionMatrix = m.multiply(l);
-    this.renderer.resetState();
-    this.renderer.render(this.scene, this.camera);
-    this.map.triggerRepaint();
-    }
     };
     
     map.on('style.load', function () {
-    map.addLayer(customLayer, 'waterway-label');
+        map.addLayer(customLayer, 'waterway-label');
     });
 
 
@@ -220,14 +340,14 @@ background: #3074a4;
                             this.className = 'active';
                             map.setLayoutProperty(clickedLayer, 'visibility', 'visible');
                         }
-                };
-        
-                var layers = document.getElementById('menu');
-                layers.appendChild(link);
+                    };
+            
+                    var layers = document.getElementById('menu');
+                    layers.appendChild(link);
+                }
             }
         }
-    }
-});
+    });
 </script>
  
 </body>
